@@ -18,6 +18,6 @@ deploying the contract on-chain.
 Checks that the code builds as WebAssembly. This command does not output any `<name>.contract`
 artifact to the `target/` directory.
 
-##### 'Cargo contract Test'
+##### 'cargo test'
 
 Runs the unit test cases for the specified contract.

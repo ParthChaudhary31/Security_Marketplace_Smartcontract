@@ -496,7 +496,6 @@ mod escrow {
                 //if arbitersprovider is finally dissatisfied.
                 else if !answer {
                     payment_info.currentstatus = AuditStatus::AuditExpired;
-                    // payment_info.value = 0; ANSHUL_REVIEW
                     if ink::env::call::build_call::<Environment>()
                         .call(self.stablecoin_address)
                         .gas_limit(0)
@@ -609,17 +608,17 @@ mod escrow {
                     .returns::<bool>()
                     .invoke();
 
-                self.env().emit_event(TokenOutgoing {
-                    id: _id,
-                    receiver: payment_info.arbiterprovider,
-                    amount: arbitersscut,
-                });
-                self.env().emit_event(TokenOutgoing {
-                    id: _id,
-                    receiver: payment_info.patron,
-                    amount: payment_info.value * haircut / 100,
-                });
                 if x && y {
+                    self.env().emit_event(TokenOutgoing {
+                        id: _id,
+                        receiver: payment_info.arbiterprovider,
+                        amount: arbitersscut,
+                    });
+                    self.env().emit_event(TokenOutgoing {
+                        id: _id,
+                        receiver: payment_info.patron,
+                        amount: payment_info.value * haircut / 100,
+                    });
                     self.audit_id_to_payment_info.insert(_id, &payment_info);
                     self.env().emit_event(AuditInfoUpdated {
                         id: Some(_id),
@@ -642,7 +641,6 @@ mod escrow {
                     || payment_info.deadline <= self.env().block_timestamp())
             {
                 payment_info.currentstatus = AuditStatus::AuditExpired;
-                // payment_info.value = 0; ANSHUL_REVIEW
                 if ink::env::call::build_call::<Environment>()
                     .call(self.stablecoin_address)
                     .gas_limit(0)
