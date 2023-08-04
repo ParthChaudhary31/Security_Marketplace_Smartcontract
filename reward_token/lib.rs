@@ -74,15 +74,15 @@ mod token {
 
 
 #[cfg(test)]
-mod testCases {
-    use ink::primitives::AccountId;
+mod test_cases {
+    // use ink::primitives::AccountId;
 
     use super ::*;
     #[cfg(feature = "ink-experimental-engine")]
     use crate::digital_certificate::digital_certificate;
-    fn random_acoount_id() -> AccountId {
-        AccountId::from([0x42;32])
-    }
+    // fn random_acoount_id() -> AccountId {
+    //     AccountId::from([0x42;32])
+    // }
 
     #[test]
     fn test_case_1() {
@@ -90,8 +90,8 @@ mod testCases {
         ink::env::test::default_accounts::<ink::env::DefaultEnvironment>();
         ink::env::test::set_caller::<ink::env::DefaultEnvironment>(accounts.alice);
         ink::env::test::set_callee::<ink::env::DefaultEnvironment>(accounts.bob);
-        let mut contract = token::Token::new(accounts.alice);
-        contract.mint(accounts.alice,1);
+        let contract = token::Token::new(accounts.alice);
+        // contract.mint(accounts.alice,1);
         let contract_owner = contract.owner;
         //Asserting Alice is the owner of contract.
         assert_eq!(contract_owner,accounts.alice);
@@ -104,7 +104,7 @@ mod testCases {
         ink::env::test::set_caller::<ink::env::DefaultEnvironment>(accounts.alice);
         ink::env::test::set_callee::<ink::env::DefaultEnvironment>(accounts.bob);
         let mut contract = token::Token::new(accounts.alice);
-        contract.mint(accounts.alice,1);
+        let _res = contract.mint(accounts.alice,1);
         let total_contract_supply = contract.total_supply();
         //Asserting Total supply will be auto updated.
         assert_eq!(total_contract_supply,1);
@@ -117,7 +117,7 @@ mod testCases {
         ink::env::test::set_caller::<ink::env::DefaultEnvironment>(accounts.alice);
         ink::env::test::set_callee::<ink::env::DefaultEnvironment>(accounts.bob);
         let mut contract = token::Token::new(accounts.alice);
-        contract.mint(accounts.alice,1);
+        let _res = contract.mint(accounts.alice,1);
         let balance_of_alice = contract.balance_of(accounts.alice);
         //Asserting Alice's balance will be updated.
         assert_eq!(balance_of_alice,1);
@@ -131,8 +131,8 @@ mod testCases {
         ink::env::test::set_callee::<ink::env::DefaultEnvironment>(accounts.bob);
         let mut contract = token::Token::new(accounts.alice);
         ink::env::test::set_caller::<ink::env::DefaultEnvironment>(accounts.charlie);
-        let Error1 = contract.mint(accounts.charlie, 1000);
+        let error1 = contract.mint(accounts.charlie, 1000);
         //Asserting a Third person (charlie) cannot call mint function.
-        assert!(Error1.is_err());
+        assert!(error1.is_err());
     }
 }
