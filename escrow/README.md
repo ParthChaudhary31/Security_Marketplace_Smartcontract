@@ -12,10 +12,9 @@ to get the println! outputs in console as well.
 
 
 
-cargo contract instantiate     --constructor new --args "5FT5xGwGYQvosDfBoRvKJXfwBZzkYnDqxWUG319xBgMLZX43" --suri //Alice
+cargo contract instantiate --constructor new --args "{Token Address}" --suri //Alice
 $(date +%s) --execute
-Used this to instantiate, maybe it worked, maybe it didn't. Let's find out.
+Use this to instantiate.
 
 
-cargo contract call --contract "5H8zt44h7wih2CSmUv9g7fPNM8YvUizSrKijHquKLgGK2RCg" --message get_current_audit_id --suri //Alice -x
-
+cargo contract call --contract "{Token address}" --message get_current_audit_id --suri //Alice -x

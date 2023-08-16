@@ -29,11 +29,18 @@ mod rewardtoken {
     #[derive(scale::Decode, scale::Encode, Default)]
     #[cfg_attr(
         feature = "std",
-        derive( scale_info::TypeInfo, ink::storage::traits::StorageLayout)
+        derive(scale_info::TypeInfo, ink::storage::traits::StorageLayout)
     )]
     pub struct Stats {
         pub successful_audits: u32,
         pub unsuccessful_audits: u32,
+    }
+
+    #[ink(event)]
+    pub struct TokenMinted {
+        token_id: u32,
+        reward_info: Option<RewardInfo>,
+        is_positive: bool,
     }
 
     #[ink(storage)]
@@ -54,7 +61,7 @@ mod rewardtoken {
 
     impl Rewardtoken {
         #[ink(constructor)]
-        pub fn new(_owner: AccountId) ->Self {
+        pub fn new(_owner: AccountId) -> Self {
             let current_id = u32::default();
             let owner = _owner;
             let balances = Mapping::default();
@@ -69,26 +76,34 @@ mod rewardtoken {
 
         /// mint function first checks that only the owner can call the contract,
         /// then it modifies the state of both the auditors_record(if it is a successful audit or unsuccessful one)
-        /// and mints the token with auditor as the recipient and all other details like audit_id, completion_time, if it was 
+        /// and mints the token with auditor as the recipient and all other details like audit_id, completion_time, if it was
         /// completed with extensions, or in what percent time, the amount, and the ipfs_hash corresponding that audit.
         #[ink(message)]
-        pub fn mint(&mut self, _recipient: AccountId, _audit_id: u32, _completion_time: u8, _extensions: u8, _amount: Balance, _ipfs_hash: String, positive_or_not: bool) ->Result<()> {
+        pub fn mint(
+            &mut self,
+            _recipient: AccountId,
+            _audit_id: u32,
+            _completion_time: u8,
+            _extensions: u8,
+            _amount: Balance,
+            _ipfs_hash: String,
+            positive_or_not: bool,
+        ) -> Result<()> {
             let caller = self.env().caller();
             if self.owner != caller {
                 return Err(Error::UnAuthorisedCall);
             }
             if positive_or_not {
                 let mut _stat = self.balances.get(&_recipient).unwrap_or_default();
-                
-                _stat.successful_audits = _stat.successful_audits+1;
+
+                _stat.successful_audits = _stat.successful_audits + 1;
                 self.balances.insert(&_recipient, &_stat);
-            }
-            else {
+            } else {
                 let mut _stat = self.balances.get(_recipient).unwrap_or_default();
-                _stat.unsuccessful_audits = _stat.unsuccessful_audits+1;
+                _stat.unsuccessful_audits = _stat.unsuccessful_audits + 1;
                 self.balances.insert(&_recipient, &_stat);
             }
-            let _reward_info = RewardInfo{
+            let _reward_info = RewardInfo {
                 recipient: _recipient,
                 audit_id: _audit_id,
                 completion_time: _completion_time,
@@ -97,6 +112,11 @@ mod rewardtoken {
                 ipfs_hash: _ipfs_hash,
             };
             self.rewarded_tokens.insert(&self.current_id, &_reward_info);
+            self.env().emit_event(TokenMinted{
+                token_id: self.current_id,
+                reward_info: Some(_reward_info),
+                is_positive: positive_or_not, 
+            });
             self.current_id = self.current_id + 1;
             Ok(())
         }
@@ -108,7 +128,7 @@ mod rewardtoken {
             self.balances.get(&auditor)
         }
 
-        /// show_reward_details returns the RewardInfo/the metadata corresponding to the 
+        /// show_reward_details returns the RewardInfo/the metadata corresponding to the
         /// reward token entered.
         #[ink(message)]
         pub fn show_reward_details(&self, reward_id: u32) -> Option<RewardInfo> {
@@ -116,7 +136,6 @@ mod rewardtoken {
         }
     }
 }
-
 
 #[cfg(test)]
 mod test_cases {
@@ -127,8 +146,7 @@ mod test_cases {
     #[test]
     fn test_assert_owner() {
         //testcase to validate that owner is set in the contract after deployment.
-        let accounts = 
-        ink::env::test::default_accounts::<ink::env::DefaultEnvironment>();
+        let accounts = ink::env::test::default_accounts::<ink::env::DefaultEnvironment>();
         ink::env::test::set_caller::<ink::env::DefaultEnvironment>(accounts.alice);
         ink::env::test::set_callee::<ink::env::DefaultEnvironment>(accounts.bob);
         let contract = rewardtoken::Rewardtoken::new(accounts.alice);
@@ -137,10 +155,9 @@ mod test_cases {
     }
 
     #[test]
-    fn test_failure_on_non_owner_call(){
+    fn test_failure_on_non_owner_call() {
         //testcase to validate that only owner can call the contract
-        let accounts = 
-        ink::env::test::default_accounts::<ink::env::DefaultEnvironment>();
+        let accounts = ink::env::test::default_accounts::<ink::env::DefaultEnvironment>();
         ink::env::test::set_caller::<ink::env::DefaultEnvironment>(accounts.alice);
         ink::env::test::set_callee::<ink::env::DefaultEnvironment>(accounts.bob);
         let mut contract = rewardtoken::Rewardtoken::new(accounts.alice);
@@ -151,36 +168,45 @@ mod test_cases {
     }
 
     #[test]
-    fn test_successful_audits_increment(){
+    fn test_successful_audits_increment() {
         //testcase to validate the successful increment in successful audits variable
-        let accounts = 
-        ink::env::test::default_accounts::<ink::env::DefaultEnvironment>();
+        let accounts = ink::env::test::default_accounts::<ink::env::DefaultEnvironment>();
         ink::env::test::set_caller::<ink::env::DefaultEnvironment>(accounts.alice);
         ink::env::test::set_callee::<ink::env::DefaultEnvironment>(accounts.bob);
         let mut contract = rewardtoken::Rewardtoken::new(accounts.alice);
         let hash = "asdf";
         let _x = contract.mint(accounts.bob, 1, 100, 5, 100, hash.to_string(), true);
-        assert_eq!(contract.show_auditors_record(accounts.bob).unwrap().successful_audits, 1);
+        assert_eq!(
+            contract
+                .show_auditors_record(accounts.bob)
+                .unwrap()
+                .successful_audits,
+            1
+        );
     }
 
     #[test]
-    fn test_unsuccessful_audits_increment(){
+    fn test_unsuccessful_audits_increment() {
         //testcase to validate the successful increment in unsuccessful audits variable
-        let accounts = 
-        ink::env::test::default_accounts::<ink::env::DefaultEnvironment>();
+        let accounts = ink::env::test::default_accounts::<ink::env::DefaultEnvironment>();
         ink::env::test::set_caller::<ink::env::DefaultEnvironment>(accounts.alice);
         ink::env::test::set_callee::<ink::env::DefaultEnvironment>(accounts.bob);
         let mut contract = rewardtoken::Rewardtoken::new(accounts.alice);
         let hash = "asdf";
         let _x = contract.mint(accounts.bob, 1, 100, 5, 100, hash.to_string(), false);
-        assert_eq!(contract.show_auditors_record(accounts.bob).unwrap().unsuccessful_audits, 1);
+        assert_eq!(
+            contract
+                .show_auditors_record(accounts.bob)
+                .unwrap()
+                .unsuccessful_audits,
+            1
+        );
     }
-    
+
     #[test]
-    fn test_successful_entry_in_rewarded_tokens_mapping(){
+    fn test_successful_entry_in_rewarded_tokens_mapping() {
         //testcase to confirm the modification of values in the mapping of reward details
-        let accounts = 
-        ink::env::test::default_accounts::<ink::env::DefaultEnvironment>();
+        let accounts = ink::env::test::default_accounts::<ink::env::DefaultEnvironment>();
         ink::env::test::set_caller::<ink::env::DefaultEnvironment>(accounts.alice);
         ink::env::test::set_callee::<ink::env::DefaultEnvironment>(accounts.bob);
         let mut contract = rewardtoken::Rewardtoken::new(accounts.alice);
