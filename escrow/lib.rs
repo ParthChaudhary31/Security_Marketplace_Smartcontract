@@ -37,11 +37,12 @@ mod escrow {
         pub auditor: AccountId,
         pub value: Balance,
         pub arbiterprovider: AccountId,
-        pub deadline: u64,
-        pub starttime: u64,
+        pub deadline: Timestamp,
+        pub starttime: Timestamp,
         pub currentstatus: AuditStatus,
     }
 
+    //errors that use can encounter in the contract flow
     #[derive(scale::Decode, scale::Encode)]
     #[cfg_attr(
         feature = "std",
@@ -50,11 +51,12 @@ mod escrow {
     pub enum Error {
         UnAuthorisedCall,
         InsufficientBalance,
-        InsufficientBalanceTest,
         InvalidArgument,
         SubmissionFailed,
         TransferFromContractFailed,
         ArbitersExtendDeadlineConditionsNotMet,
+        WrongState,
+        DeadlinePassed,
     }
 
     #[derive(scale::Decode, scale::Encode)]
@@ -67,8 +69,8 @@ mod escrow {
     // deadline that s/he is proposing
     // #[ink::storage_item]
     pub struct IncreaseRequest {
-        haircut_percentage: Balance,
-        newdeadline: u64,
+        pub haircut_percentage: Balance,
+        pub new_deadline: Timestamp,
     }
     // emitted when an audit ID is assigned to an
     // auditor.
@@ -98,7 +100,7 @@ mod escrow {
     #[ink(event)]
     pub struct DeadlineExtendRequest {
         id: u32,
-        newtime: u64,
+        newtime: Timestamp,
         haircut: Balance,
     }
 
@@ -122,6 +124,7 @@ mod escrow {
     #[ink(event)]
     pub struct TokenIncoming {
         id: u32,
+        amount: Balance,
     }
 
     // emitted when tokens are released from the escrow, maybe
@@ -168,31 +171,41 @@ mod escrow {
             }
         }
 
+        //read function to see total number of audits in escrow
         #[ink(message)]
         pub fn get_current_audit_id(&self) -> u32 {
             self.current_audit_id
         }
 
+        //read function that returns the stablecoin that is being used
         #[ink(message)]
         pub fn know_your_stablecoin(&self) -> AccountId {
             self.stablecoin_address
         }
 
+        //read function that gives the details of paymentinfo
         #[ink(message)]
         pub fn get_paymentinfo(&self, id: u32) -> Option<PaymentInfo> {
             self.audit_id_to_payment_info.get(&id)
         }
 
+        //read function that returns the hash/link of the submitted reports on audits
+        #[ink(message)]
+        pub fn get_submitted_reports(&self, id: u32) -> Option<String> {
+            self.audit_id_to_ipfs_hash.get(&id)
+        }
+
+        //read function that returns time increase request details
         #[ink(message)]
         pub fn query_timeincreaserequest(&self, id: u32) -> Option<IncreaseRequest> {
             self.audit_id_to_time_increase_request.get(&id)
         }
 
-
         //create new payment function is to be called by the patron by depositing the said sum in the contract, and choosing a rough deadline and balance for the audit job.
         //argument: value (Balance) that will be locked in the escrow
         //argument: arbiter_provider (AccountId) the service that will provide with arbiters
-        //deadline: amount of time from the assigning of the auditor for successful audit
+        //argument: deadline, amount of time from the assigning of the auditor for successful audit
+        //argument: salt(u64) a random number to be used by the frontend to verify the post creation
         //the function will create a new payment, lock in the value amount of payment tokens, and
         // assign it to current_audit_id, increasing the audit_id afterwards
         //and emitting the event for AuditInfoUpdated.
@@ -201,9 +214,9 @@ mod escrow {
             &mut self,
             _value: Balance,
             _arbiter_provider: AccountId,
-            _deadline: u64,
-            _salt: u64,
+            _deadline: Timestamp,
             //this deadline is deadline that will be added to current time once the audit is assigned to an auditor.
+            _salt: u64,
         ) -> Result<()> {
             let _now = self.env().block_timestamp();
             let x = PaymentInfo {
@@ -233,6 +246,7 @@ mod escrow {
             if matches!(xyz.unwrap().unwrap(), Result::Ok(())) {
                 self.env().emit_event(TokenIncoming {
                     id: self.current_audit_id,
+                    amount: _value,
                 });
                 self.audit_id_to_payment_info
                     .insert(&self.current_audit_id, &x);
@@ -244,15 +258,14 @@ mod escrow {
                 self.current_audit_id = self.current_audit_id + 1;
                 return Ok(());
             } else {
-                return Err(Error::InsufficientBalanceTest);
+                return Err(Error::InsufficientBalance);
             }
         }
 
-        
-        //argument: id(u32) to access the audit ID.
+        //argument: _id(u32) to access the audit ID.
         //argument: _auditor(AccountId) the id of auditor being assigned for the audit.
         //argument: _new_value (Balance) the new value if off-chain patron and auditor decided to have a new value
-        //argument: _new_deadline(u64) new deadline decided by patron and auditor off-chain.
+        //argument: _new_deadline(Timestamp) new deadline decided by patron and auditor off-chain.
         // the function verifies if the caller is patron of the audit ID in question,
         //and then assigns the auditor, resets the start time, and marks a deadline,
         //emitting the event AuditIdAssigned
@@ -262,12 +275,12 @@ mod escrow {
         #[ink(message)]
         pub fn assign_audit(
             &mut self,
-            id: u32,
+            _id: u32,
             _auditor: AccountId,
             _new_value: Balance,
-            _new_deadline: u64,
+            _new_deadline: Timestamp,
         ) -> Result<()> {
-            let mut payment_info = self.audit_id_to_payment_info.get(id).unwrap();
+            let mut payment_info = self.audit_id_to_payment_info.get(_id).unwrap();
             let _now = self.env().block_timestamp();
             if payment_info.patron == self.env().caller()
                 && matches!(payment_info.currentstatus, AuditStatus::AuditCreated)
@@ -277,9 +290,9 @@ mod escrow {
                     payment_info.starttime = _now;
                     payment_info.deadline = payment_info.deadline + _now;
                     payment_info.currentstatus = AuditStatus::AuditAssigned;
-                    self.audit_id_to_payment_info.insert(id, &payment_info);
+                    self.audit_id_to_payment_info.insert(_id, &payment_info);
                     self.env().emit_event(AuditIdAssigned {
-                        id: Some(self.current_audit_id),
+                        id: Some(_id),
                         payment_info: Some(payment_info),
                     });
                     return Ok(());
@@ -288,9 +301,9 @@ mod escrow {
                     payment_info.starttime = _now;
                     payment_info.deadline = _new_deadline + _now;
                     payment_info.currentstatus = AuditStatus::AuditAssigned;
-                    self.audit_id_to_payment_info.insert(id, &payment_info);
+                    self.audit_id_to_payment_info.insert(_id, &payment_info);
                     self.env().emit_event(AuditIdAssigned {
-                        id: Some(self.current_audit_id),
+                        id: Some(_id),
                         payment_info: Some(payment_info),
                     });
                     return Ok(());
@@ -316,9 +329,9 @@ mod escrow {
                             payment_info.value = _new_value;
                             payment_info.deadline = _new_deadline + _now;
                             payment_info.currentstatus = AuditStatus::AuditAssigned;
-                            self.audit_id_to_payment_info.insert(id, &payment_info);
+                            self.audit_id_to_payment_info.insert(_id, &payment_info);
                             self.env().emit_event(AuditIdAssigned {
-                                id: Some(self.current_audit_id),
+                                id: Some(_id),
                                 payment_info: Some(payment_info),
                             });
                             return Ok(());
@@ -339,6 +352,16 @@ mod escrow {
                             .returns::<Result<()>>()
                             .try_invoke();
                         if matches!(xyz.unwrap().unwrap(), Result::Ok(())) {
+                            payment_info.auditor = _auditor;
+                            payment_info.starttime = _now;
+                            payment_info.value = _new_value;
+                            payment_info.deadline = _new_deadline + _now;
+                            payment_info.currentstatus = AuditStatus::AuditAssigned;
+                            self.audit_id_to_payment_info.insert(_id, &payment_info);
+                            self.env().emit_event(AuditIdAssigned {
+                                id: Some(_id),
+                                payment_info: Some(payment_info),
+                            });
                             return Ok(());
                         }
                         return Err(Error::TransferFromContractFailed);
@@ -350,7 +373,7 @@ mod escrow {
         }
 
         //argument: _id (u32) audit Id
-        //argument: _time (u64) the new deadline
+        //argument: _time (Timestamp) the new deadline
         //argument: haircut_percentage(Balance) the part of value that will be sent back to the patron for delay
         // the function verifies that the auditor is calling the function, then the request is made,
         //mapping of IncreaseRequest updated, and event is emitted for DeadlineExtendRequest
@@ -358,13 +381,13 @@ mod escrow {
         pub fn request_additional_time(
             &mut self,
             _id: u32,
-            _time: u64,
+            _time: Timestamp,
             _haircut_percentage: Balance,
         ) -> Result<()> {
             if self.get_paymentinfo(_id).unwrap().auditor == self.env().caller() {
                 let x = IncreaseRequest {
                     haircut_percentage: _haircut_percentage,
-                    newdeadline: _time,
+                    new_deadline: _time,
                 };
                 self.audit_id_to_time_increase_request.insert(_id, &x);
                 self.env().emit_event(DeadlineExtendRequest {
@@ -390,7 +413,7 @@ mod escrow {
                     .unwrap()
                     .haircut_percentage;
                 if haircut < 100 {
-                    let new_deadline = self.query_timeincreaserequest(_id).unwrap().newdeadline;
+                    let new_deadline = self.query_timeincreaserequest(_id).unwrap().new_deadline;
 
                     let mut payment_info = self.audit_id_to_payment_info.get(_id).unwrap();
                     let value0 = payment_info.value * haircut / 100;
@@ -431,29 +454,34 @@ mod escrow {
             Err(Error::UnAuthorisedCall)
         }
 
-        //argument: id (u32) The audit Id for which ipfs hash will be submitted,
-        //argument: ipfs_hash (String) the hash for the audit reports
+        //argument: _id (u32) The audit Id for which ipfs hash will be submitted,
+        //argument: _ipfs_hash (String) the hash for the audit reports
         // the function changes the state of payment_info's audit status, and inserts the ipfs hash for the corresponding id.
         //event is emitted for AuditSubmitted.
         #[ink(message)]
         pub fn mark_submitted(&mut self, _id: u32, _ipfs_hash: String) -> Result<()> {
             let mut payment_info = self.audit_id_to_payment_info.get(_id).unwrap();
-            if payment_info.auditor == self.env().caller()
-                && matches!(payment_info.currentstatus, AuditStatus::AuditAssigned)
-                && payment_info.deadline > self.env().block_timestamp()
-            {
-                self.audit_id_to_ipfs_hash.insert(_id, &_ipfs_hash);
-                self.env().emit_event(AuditSubmitted {
-                    id: _id,
-                    ipfs_hash: _ipfs_hash,
-                });
-                payment_info.currentstatus = AuditStatus::AuditSubmitted;
-                self.audit_id_to_payment_info.insert(_id, &payment_info);
-                return Ok(());
+            // matches!(payment_info.currentstatus, AuditStatus::AuditAssigned)
+            // && payment_info.deadline > self.env().block_timestamp()
+            if payment_info.auditor == self.env().caller() {
+                if matches!(payment_info.currentstatus, AuditStatus::AuditAssigned) {
+                    if payment_info.deadline > self.env().block_timestamp() {
+                        self.audit_id_to_ipfs_hash.insert(_id, &_ipfs_hash);
+                        payment_info.currentstatus = AuditStatus::AuditSubmitted;
+                        self.audit_id_to_payment_info.insert(_id, &payment_info);
+                        self.env().emit_event(AuditSubmitted {
+                            id: _id,
+                            ipfs_hash: _ipfs_hash,
+                        });
+                        return Ok(());
+                    } else {
+                        return Err(Error::DeadlinePassed);
+                    }
+                } else {
+                    return Err(Error::WrongState);
+                }
             }
-            //this error could incur due to multiple reasons including
-            // wrong caller, wrong state, or crossed deadline
-            Err(Error::SubmissionFailed)
+            Err(Error::UnAuthorisedCall)
         }
 
         //argument: id(u32) the audit id for assessment
@@ -468,8 +496,8 @@ mod escrow {
         // if true, transfer happens, if false, function sets the audit status to expired, and returns the tokens to patron.
         //only then will the transfers happen.
         #[ink(message)]
-        pub fn assess_audit(&mut self, id: u32, answer: bool) -> Result<()> {
-            let mut payment_info = self.audit_id_to_payment_info.get(id).unwrap();
+        pub fn assess_audit(&mut self, _id: u32, answer: bool) -> Result<()> {
+            let mut payment_info = self.audit_id_to_payment_info.get(_id).unwrap();
             //C1
             if self.env().caller() == payment_info.patron
                 && matches!(payment_info.currentstatus, AuditStatus::AuditSubmitted)
@@ -497,35 +525,40 @@ mod escrow {
                                 ink::selector_bytes!("transfer"),
                             ))
                             .push_arg(payment_info.arbiterprovider)
-                            .push_arg(payment_info.value * 2 / 100), // .push_arg(&[0x10u8; 32]),
+                            .push_arg(payment_info.value * 2 / 100),
                         )
                         .returns::<Result<()>>()
                         .try_invoke();
+
                     if matches!(xyz.unwrap().unwrap(), Result::Ok(()))
                         && matches!(zyx.unwrap().unwrap(), Result::Ok(()))
                     {
                         self.env().emit_event(TokenOutgoing {
-                            id: id,
+                            id: _id,
                             receiver: payment_info.auditor,
                             amount: payment_info.value * 98 / 100,
                         });
 
                         self.env().emit_event(TokenOutgoing {
-                            id: id,
+                            id: _id,
                             receiver: payment_info.arbiterprovider,
                             amount: payment_info.value * 2 / 100,
                         });
                         payment_info.currentstatus = AuditStatus::AuditCompleted;
-                        self.audit_id_to_payment_info.insert(id, &payment_info);
+                        payment_info.value = payment_info.value * 98 / 100;
+                        self.audit_id_to_payment_info.insert(_id, &payment_info);
+                        self.env().emit_event(AuditInfoUpdated {
+                            id: Some(_id),
+                            payment_info: Some(self.audit_id_to_payment_info.get(_id).unwrap()),
+                            updated_by: Some(self.env().caller()),
+                        });
                         return Ok(());
                     }
                     return Err(Error::TransferFromContractFailed);
                 } else {
                     payment_info.currentstatus = AuditStatus::AuditAwaitingValidation;
-                    self.audit_id_to_payment_info.insert(id, &payment_info);
-                    self.env().emit_event(AuditRequestsArbitration {
-                        id: self.current_audit_id,
-                    });
+                    self.audit_id_to_payment_info.insert(_id, &payment_info);
+                    self.env().emit_event(AuditRequestsArbitration { id: _id });
                     return Ok(());
                 }
             }
@@ -564,28 +597,35 @@ mod escrow {
                         )
                         .returns::<Result<()>>()
                         .try_invoke();
+
                     if matches!(xyz.unwrap().unwrap(), Result::Ok(()))
                         && matches!(zyx.unwrap().unwrap(), Result::Ok(()))
                     {
                         self.env().emit_event(TokenOutgoing {
-                            id: id,
+                            id: _id,
                             receiver: payment_info.auditor,
                             amount: payment_info.value * 95 / 100,
                         });
 
                         self.env().emit_event(TokenOutgoing {
-                            id: id,
+                            id: _id,
                             receiver: payment_info.arbiterprovider,
                             amount: payment_info.value * 5 / 100,
                         });
+                        payment_info.value = payment_info.value * 95 / 100;
                         payment_info.currentstatus = AuditStatus::AuditCompleted;
-                        self.audit_id_to_payment_info.insert(id, &payment_info);
+                        self.audit_id_to_payment_info.insert(_id, &payment_info);
+                        self.env().emit_event(AuditInfoUpdated {
+                            id: Some(_id),
+                            payment_info: Some(self.audit_id_to_payment_info.get(_id).unwrap()),
+                            updated_by: Some(self.env().caller()),
+                        });
                         return Ok(());
                     }
                     return Err(Error::TransferFromContractFailed);
                 }
                 //if arbitersprovider is finally dissatisfied.
-                else if !answer {
+                else {
                     let xyz = ink::env::call::build_call::<Environment>()
                         .call(self.stablecoin_address)
                         .gas_limit(0)
@@ -615,24 +655,24 @@ mod escrow {
                     if matches!(xyz.unwrap().unwrap(), Result::Ok(()))
                         && matches!(zyx.unwrap().unwrap(), Result::Ok(()))
                     {
-                        payment_info.currentstatus = AuditStatus::AuditExpired;
-
                         self.env().emit_event(TokenOutgoing {
-                            id: id,
+                            id: _id,
                             receiver: payment_info.patron,
                             amount: payment_info.value * 95 / 100,
                         });
                         self.env().emit_event(TokenOutgoing {
-                            id: id,
+                            id: _id,
                             receiver: payment_info.arbiterprovider,
                             amount: payment_info.value * 5 / 100,
                         });
                         self.env().emit_event(AuditInfoUpdated {
-                            id: Some(id),
-                            payment_info: Some(self.audit_id_to_payment_info.get(id).unwrap()),
+                            id: Some(_id),
+                            payment_info: Some(self.audit_id_to_payment_info.get(_id).unwrap()),
                             updated_by: Some(self.env().caller()),
                         });
-                        self.audit_id_to_payment_info.insert(id, &payment_info);
+                        payment_info.value = payment_info.value * 95 / 100;
+                        payment_info.currentstatus = AuditStatus::AuditExpired;
+                        self.audit_id_to_payment_info.insert(_id, &payment_info);
                         return Ok(());
                     }
                     return Err(Error::TransferFromContractFailed);
@@ -643,7 +683,7 @@ mod escrow {
         }
 
         //argument: id(u32) the audit ID for extending deadline
-        //argument: new_deadline(u64) the new deadline
+        //argument: new_deadline(Timestamp) the new deadline
         //argument: haircut(Balance) the decided haircut for the auditor
         //argument: arbitersshare(Balance) decided off-chain by the arbitersproivder and the arbiters according to their inputs
         //and work put in for the audit ID.
@@ -655,14 +695,14 @@ mod escrow {
         pub fn arbiters_extend_deadline(
             &mut self,
             _id: u32,
-            new_deadline: u64,
+            new_deadline: Timestamp,
             haircut: Balance,
             arbitersshare: Balance,
         ) -> Result<()> {
             //checking for the haircut to be lesser than 10% and new deadline to be at least more than 1 day.
             let mut payment_info = self.audit_id_to_payment_info.get(_id).unwrap();
             if haircut <= 90
-                && new_deadline > self.env().block_timestamp() + 86400
+                && new_deadline >= self.env().block_timestamp() + 86400000
                 && self.env().caller() == payment_info.arbiterprovider
                 && arbitersshare <= 10
                 && matches!(
@@ -676,7 +716,8 @@ mod escrow {
                 payment_info.value = payment_info.value * (100 - (arbitersshare + haircut)) / 100;
                 // Update the deadline in storage
                 payment_info.deadline = new_deadline;
-                // make the respective transfers to arbitersprovider and
+                payment_info.currentstatus = AuditStatus::AuditAssigned;
+
                 let xyz = ink::env::call::build_call::<Environment>()
                     .call(self.stablecoin_address)
                     .gas_limit(0)
@@ -705,8 +746,10 @@ mod escrow {
                     .returns::<Result<()>>()
                     .try_invoke();
 
-                if matches!(xyz.unwrap().unwrap(), Result::Ok(()))
-                    && matches!(zyx.unwrap().unwrap(), Result::Ok(()))
+                //matches!(xyz.unwrap().unwrap(), Result::Ok(()))
+                //removed from condition.
+                if matches!(zyx.unwrap().unwrap(), Result::Ok(()))
+                    && matches!(xyz.unwrap().unwrap(), Result::Ok(()))
                 {
                     self.env().emit_event(TokenOutgoing {
                         id: _id,
@@ -733,11 +776,13 @@ mod escrow {
         //argument: id(u32) the audit ID to be retrieved
         // the function can only be called by the patron, and only when the state is created or deadline has passed.
         // this updates the status of the audit, fires the event of TokenOutgoing, returns the value to the patron,
-        pub fn expire_audit(&mut self, id: u32) -> Result<()> {
-            let mut payment_info = self.audit_id_to_payment_info.get(id).unwrap();
+        #[ink(message)]
+        pub fn expire_audit(&mut self, _id: u32) -> Result<()> {
+            let mut payment_info = self.audit_id_to_payment_info.get(_id).unwrap();
             if payment_info.patron == self.env().caller()
                 && (matches!(payment_info.currentstatus, AuditStatus::AuditCreated)
-                    || payment_info.deadline <= self.env().block_timestamp())
+                    || (matches!(payment_info.currentstatus, AuditStatus::AuditAssigned)
+                        && payment_info.deadline <= self.env().block_timestamp()))
             {
                 payment_info.currentstatus = AuditStatus::AuditExpired;
                 let xyz = ink::env::call::build_call::<Environment>()
@@ -755,16 +800,16 @@ mod escrow {
                     .try_invoke();
                 if matches!(xyz.unwrap().unwrap(), Result::Ok(())) {
                     self.env().emit_event(TokenOutgoing {
-                        id: id,
+                        id: _id,
                         receiver: payment_info.patron,
                         amount: payment_info.value,
                     });
                     self.env().emit_event(AuditInfoUpdated {
-                        id: Some(id),
-                        payment_info: Some(self.audit_id_to_payment_info.get(id).unwrap()),
+                        id: Some(_id),
+                        payment_info: Some(self.audit_id_to_payment_info.get(_id).unwrap()),
                         updated_by: Some(self.env().caller()),
                     });
-                    self.audit_id_to_payment_info.insert(id, &payment_info);
+                    self.audit_id_to_payment_info.insert(_id, &payment_info);
                     return Ok(());
                 }
             }
